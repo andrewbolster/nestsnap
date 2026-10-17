@@ -1,0 +1,10 @@
+[Unit]
+Description=nestsnap: build last week's (Mon-Sun) timelapse, then mirror it
+After=docker.service nestsnap-timelapse.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/nestsnap/nestsnap.env
+Environment=UV_CACHE_DIR=/var/cache/nestsnap/uv
+ExecStart=/opt/nestsnap/timelapse.py --last-week --timestamp
+ExecStartPost=-/bin/systemctl start nestsnap-mirror.service

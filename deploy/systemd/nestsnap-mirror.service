@@ -1,0 +1,9 @@
+[Unit]
+Description=nestsnap: copy snapshots and timelapses to the mirror (never deletes there)
+ConditionPathExists=/etc/nestsnap/nestsnap.env
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/nestsnap/nestsnap.env
+# No --delete: the mirror keeps everything. Dot-files (staging, half-built videos) are skipped.
+ExecStart=/usr/bin/rsync -rt --no-perms --no-owner --no-group --mkpath --exclude=.* ${SNAPSHOT_ROOT}/ ${MIRROR_DEST}/

@@ -1,0 +1,7 @@
+# Secrets and site config live in /etc/nestsnap, never here.
+*.env
+!*.env.example
+http_path
+__pycache__/
+*.mp4
+*.jpg

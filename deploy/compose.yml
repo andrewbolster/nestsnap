@@ -1,0 +1,36 @@
+# Portainer/compose stack. Code is a checkout at /opt/nestsnap; secrets live in /etc/nestsnap.
+services:
+  go2rtc:
+    image: alexxit/go2rtc:1.9.14
+    container_name: nestsnap-go2rtc
+    restart: unless-stopped
+    network_mode: host
+    entrypoint: ["sh", "-c", "set -a; . /secrets/nest.env; exec go2rtc -config /config/go2rtc.yaml"]
+    volumes:
+      - /opt/nestsnap/deploy/go2rtc.yaml:/config/go2rtc.yaml:ro
+      - /etc/nestsnap/nest.env:/secrets/nest.env:ro
+  capture:
+    image: ghcr.io/astral-sh/uv:python3.12-alpine
+    container_name: nestsnap-capture
+    restart: unless-stopped
+    network_mode: host
+    depends_on: [go2rtc]
+    entrypoint: ["sh", "-c", "set -a; . /secrets/ha.env; exec uv run --script /app/capture.py"]
+    environment:
+      TZ: Europe/London
+      UV_CACHE_DIR: /uv-cache
+      STREAM: living_room
+      MOTION_ENTITY: event.living_room_living_room_camera_motion
+      IDLE: "60"
+      FAST: "5"
+      HOLD: "30"
+      KEEP_DAYS: "0" # 0 = never prune
+      PORT: "8089"
+    volumes:
+      - /opt/nestsnap/capture.py:/app/capture.py:ro
+      - /etc/nestsnap/ha.env:/secrets/ha.env:ro
+      - /etc/nestsnap/http_path:/secrets/http_path:ro
+      - /data/snapshots/living_room:/snapshots
+      - uv-cache:/uv-cache
+volumes:
+  uv-cache:

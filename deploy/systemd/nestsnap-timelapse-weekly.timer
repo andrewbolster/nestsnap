@@ -1,0 +1,9 @@
+[Unit]
+Description=nestsnap: weekly timelapse, Monday 01:00
+
+[Timer]
+OnCalendar=Mon *-*-* 01:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
