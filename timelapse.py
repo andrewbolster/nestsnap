@@ -19,6 +19,7 @@ Uses ffmpeg from PATH if present, otherwise the linuxserver/ffmpeg Docker image.
   timelapse.py --start D --end D        -> <camera>/timelapses/<start>_<end>.mp4
   timelapse.py --last-week              previous Mon-Sun -> <camera>/weekly/<YYYY>-W<ww>.mp4
 """
+
 import datetime as dt
 import os
 import pathlib
@@ -31,15 +32,23 @@ from rich.console import Console
 
 IMAGE = "lscr.io/linuxserver/ffmpeg:latest"
 DOCKER_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
-LOCAL_FONTS = ("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", "/System/Library/Fonts/Menlo.ttc",
-               "/Library/Fonts/Arial.ttf")
+LOCAL_FONTS = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "/System/Library/Fonts/Menlo.ttc",
+    "/Library/Fonts/Arial.ttf",
+)
 console = Console()
 Date = click.DateTime(formats=["%Y-%m-%d"])
 
 
 @click.command(context_settings={"show_default": True}, help=__doc__)
-@click.option("--root", type=click.Path(exists=True, file_okay=False, path_type=pathlib.Path),
-              default="/data/snapshots", envvar="SNAPSHOT_ROOT", help="Folder holding the camera folders.")
+@click.option(
+    "--root",
+    type=click.Path(exists=True, file_okay=False, path_type=pathlib.Path),
+    default="/data/snapshots",
+    envvar="SNAPSHOT_ROOT",
+    help="Folder holding the camera folders.",
+)
 @click.option("--camera", default="living_room")
 @click.option("--start", type=Date, help="First day (default: yesterday).")
 @click.option("--end", type=Date, help="Last day (default: --start).")
@@ -99,23 +108,61 @@ def main(root, camera, start, end, last_week, out, timestamp, fps, max_drop, fon
 
         filters = [f"mpdecimate=max={max_drop}"] if max_drop else []
         if timestamp:
-            filters.append(f"drawtext=fontfile={font}:text='%{{metadata\\:lavf.image2dec.source_basename}}'"
-                           ":x=24:y=h-th-24:fontsize=32:fontcolor=white:box=1:boxcolor=black@0.55:boxborderw=10")
+            filters.append(
+                f"drawtext=fontfile={font}:text='%{{metadata\\:lavf.image2dec.source_basename}}'"
+                ":x=24:y=h-th-24:fontsize=32:fontcolor=white:box=1:boxcolor=black@0.55:boxborderw=10"
+            )
         filters += [f"setpts=N/{fps}/TB", "format=yuv420p"]
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_name(f".{target.name}.tmp.mp4")
         with console.status(f"encoding {frames} frames from {camera} {start}..{end}"):
-            subprocess.run([*ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-                            "-f", "image2", "-c:v", "mjpeg", "-export_path_metadata", "1", "-framerate", str(fps),
-                            "-pattern_type", "glob", "-i", inside(stage) + "/*",
-                            "-vf", ",".join(filters), "-fps_mode", "cfr", "-r", str(fps),
-                            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-movflags", "+faststart",
-                            inside(tmp)], check=True)
+            subprocess.run(
+                [
+                    *ffmpeg,
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-f",
+                    "image2",
+                    "-c:v",
+                    "mjpeg",
+                    "-export_path_metadata",
+                    "1",
+                    "-framerate",
+                    str(fps),
+                    "-pattern_type",
+                    "glob",
+                    "-i",
+                    inside(stage) + "/*",
+                    "-vf",
+                    ",".join(filters),
+                    "-fps_mode",
+                    "cfr",
+                    "-r",
+                    str(fps),
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "23",
+                    "-movflags",
+                    "+faststart",
+                    inside(tmp),
+                ],
+                check=True,
+            )
         tmp.replace(target)
-        seconds = subprocess.run([*ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
-                                  inside(target)], capture_output=True, text=True).stdout.strip()
-        console.print(f"[green]{camera} {start}..{end}[/]: {frames} frames -> {target} "
-                      f"({float(seconds or 0):.1f}s, {target.stat().st_size // 1024} KiB)")
+        seconds = subprocess.run(
+            [*ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", inside(target)],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        console.print(
+            f"[green]{camera} {start}..{end}[/]: {frames} frames -> {target} "
+            f"({float(seconds or 0):.1f}s, {target.stat().st_size // 1024} KiB)"
+        )
     finally:
         shutil.rmtree(stage, ignore_errors=True)
 

@@ -10,6 +10,7 @@ Motion comes from a Home Assistant event entity (e.g. a Nest camera's motion/per
 events): any event within --hold seconds switches to the --fast interval.
 The newest frame is served at http://<host>:<port>/<http-path>/latest.jpg.
 """
+
 import datetime as dt
 import http.server
 import logging
@@ -68,8 +69,13 @@ def prune(out: pathlib.Path, keep_days: int) -> None:
 
 
 @click.command(context_settings={"show_default": True})
-@click.option("--out", type=click.Path(file_okay=False, path_type=pathlib.Path), default="/snapshots", envvar="OUT",
-              help="Camera folder: frames go to OUT/<day>/snapshots/.")
+@click.option(
+    "--out",
+    type=click.Path(file_okay=False, path_type=pathlib.Path),
+    default="/snapshots",
+    envvar="OUT",
+    help="Camera folder: frames go to OUT/<day>/snapshots/.",
+)
 @click.option("--go2rtc", default="http://127.0.0.1:1984", envvar="GO2RTC", help="go2rtc API URL.")
 @click.option("--stream", default="living_room", envvar="STREAM", help="go2rtc stream name.")
 @click.option("--motion-entity", default="event.living_room_living_room_camera_motion", envvar="MOTION_ENTITY")
@@ -80,25 +86,44 @@ def prune(out: pathlib.Path, keep_days: int) -> None:
 @click.option("--hold", default=30, envvar="HOLD", help="Stay fast this long after the last motion event.")
 @click.option("--keep-days", default=0, envvar="KEEP_DAYS", help="Delete local days older than this (0 = never).")
 @click.option("--port", default=8089, envvar="PORT", help="Port for latest.jpg (0 = off).")
-@click.option("--http-path-file", type=click.Path(dir_okay=False, path_type=pathlib.Path),
-              default="/secrets/http_path", envvar="HTTP_PATH_FILE", help="File holding the private URL path.")
+@click.option(
+    "--http-path-file",
+    type=click.Path(dir_okay=False, path_type=pathlib.Path),
+    default="/secrets/http_path",
+    envvar="HTTP_PATH_FILE",
+    help="File holding the private URL path.",
+)
 def main(out, go2rtc, stream, motion_entity, ha_url, ha_token, idle, fast, hold, keep_days, port, http_path_file):
     """Capture snapshots from a go2rtc stream, faster while Home Assistant reports motion."""
-    logging.basicConfig(level=logging.INFO, format="%(message)s", datefmt="[%X]",
-                        handlers=[RichHandler(show_path=False, rich_tracebacks=True)])
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        datefmt="[%X]",
+        handlers=[RichHandler(show_path=False, rich_tracebacks=True)],
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # it logs every request at INFO
     latest: dict = {}
     threading.Thread(target=keep_stream_open, args=(go2rtc, stream), daemon=True).start()
     if port:
-        threading.Thread(target=serve_latest, args=(port, http_path_file.read_text().strip(), latest), daemon=True).start()
-    log.info("capturing %s: every %ss, %ss within %ss of %s; keeping %s", stream, idle, fast, hold, motion_entity,
-             f"{keep_days} days" if keep_days else "everything")
+        threading.Thread(
+            target=serve_latest, args=(port, http_path_file.read_text().strip(), latest), daemon=True
+        ).start()
+    log.info(
+        "capturing %s: every %ss, %ss within %ss of %s; keeping %s",
+        stream,
+        idle,
+        fast,
+        hold,
+        motion_entity,
+        f"{keep_days} days" if keep_days else "everything",
+    )
 
     ha = httpx.Client(base_url=ha_url, headers={"Authorization": f"Bearer {ha_token}"}, timeout=5)
     cam = httpx.Client(base_url=go2rtc, timeout=60)
     next_prune, active_before, due = 0.0, None, 0.0
     while True:
         # Poll motion every 2 s so a new event switches to fast mode straight away.
-        now = dt.datetime.now(dt.timezone.utc)
+        now = dt.datetime.now(dt.UTC)
         try:
             last = dt.datetime.fromisoformat(ha.get(f"/api/states/{motion_entity}").raise_for_status().json()["state"])
             active = (now - last).total_seconds() < hold

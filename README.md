@@ -73,3 +73,14 @@ have a Device Access project and an OAuth client), Docker, and `uv` on root's PA
 The newest frame is served at `http://<host>:8089/<contents of /etc/nestsnap/http_path>/latest.jpg`,
 e.g. for a Home Assistant camera card. go2rtc only listens on localhost, because its UI shows
 stream sources, which include the token.
+
+## Development
+
+```
+uvx pre-commit install     # ruff (lint + format), gitleaks (secrets), shellcheck, basic checks
+uvx pre-commit run --all-files
+```
+
+The same hooks run in GitHub Actions on every push. Deploy on the host with
+`git -C /opt/nestsnap pull`, then restart the stack (capture) or nothing (timelapse/mirror pick
+up changes on their next run).
