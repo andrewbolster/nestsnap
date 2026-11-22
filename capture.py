@@ -9,6 +9,11 @@ Frames go to OUT/<YYYY-MM-DD>/snapshots/HHMMSS.jpg (fast-mode frames end _motion
 Motion comes from a Home Assistant event entity (e.g. a Nest camera's motion/person/sound
 events): any event within --hold seconds switches to the --fast interval.
 The newest frame is served at http://<host>:<port>/<http-path>/latest.jpg.
+
+Frames are grabbed with a one-shot ffmpeg from go2rtc's RTSP output rather than /api/frame.jpeg:
+frame.jpeg leaks a consumer (and its buffers) whenever a request fails or gives up before a
+keyframe (go2rtc #2624), which grew go2rtc to 5 GB in a month. An RTSP client's consumer goes
+when its connection closes, even if ffmpeg is killed mid-wait.
 """
 
 import datetime as dt
@@ -16,6 +21,7 @@ import http.server
 import logging
 import pathlib
 import shutil
+import subprocess
 import threading
 import time
 
@@ -39,6 +45,19 @@ def keep_stream_open(go2rtc: str, stream: str) -> None:
         except httpx.HTTPError as e:
             log.warning("stream error: %s", e)
         time.sleep(5)
+
+
+def grab(rtsp: str, stream: str, quality: int, timeout: float) -> bytes:
+    """One JPEG from the stream: waits for the next keyframe (Nest sends one every 10 s)."""
+    # Decode keyframes only: frames before the first one can't decode (no SPS/PPS yet), and enough
+    # failures make ffmpeg exit 69 even after writing a good frame.
+    cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", "-rtsp_transport", "tcp", "-skip_frame", "nokey"]
+    cmd += ["-i", f"{rtsp}/{stream}"]
+    cmd += ["-an", "-frames:v", "1", "-q:v", str(quality), "-f", "image2pipe", "-c:v", "mjpeg", "-"]
+    r = subprocess.run(cmd, capture_output=True, timeout=timeout, check=False)
+    if r.returncode or not r.stdout.startswith(b"\xff\xd8"):
+        raise RuntimeError(f"ffmpeg exit {r.returncode}: {r.stderr.decode(errors='replace').strip()[-200:]}")
+    return r.stdout
 
 
 def serve_latest(port: int, path: str, latest: dict) -> None:
@@ -77,7 +96,9 @@ def prune(out: pathlib.Path, keep_days: int) -> None:
     help="Camera folder: frames go to OUT/<day>/snapshots/.",
 )
 @click.option("--go2rtc", default="http://127.0.0.1:1984", envvar="GO2RTC", help="go2rtc API URL.")
+@click.option("--rtsp", default="rtsp://127.0.0.1:8554", envvar="RTSP", help="go2rtc RTSP URL (frames).")
 @click.option("--stream", default="living_room", envvar="STREAM", help="go2rtc stream name.")
+@click.option("--quality", default=6, envvar="QUALITY", help="JPEG quality, ffmpeg -q:v (2 best, 31 worst).")
 @click.option("--motion-entity", default="event.living_room_living_room_camera_motion", envvar="MOTION_ENTITY")
 @click.option("--ha-url", envvar="HA_URL", required=True)
 @click.option("--ha-token", envvar="HA_TOKEN", required=True, show_default=False)
@@ -93,7 +114,22 @@ def prune(out: pathlib.Path, keep_days: int) -> None:
     envvar="HTTP_PATH_FILE",
     help="File holding the private URL path.",
 )
-def main(out, go2rtc, stream, motion_entity, ha_url, ha_token, idle, fast, hold, keep_days, port, http_path_file):
+def main(
+    out,
+    go2rtc,
+    rtsp,
+    stream,
+    quality,
+    motion_entity,
+    ha_url,
+    ha_token,
+    idle,
+    fast,
+    hold,
+    keep_days,
+    port,
+    http_path_file,
+):
     """Capture snapshots from a go2rtc stream, faster while Home Assistant reports motion."""
     logging.basicConfig(
         level=logging.INFO,
@@ -119,7 +155,6 @@ def main(out, go2rtc, stream, motion_entity, ha_url, ha_token, idle, fast, hold,
     )
 
     ha = httpx.Client(base_url=ha_url, headers={"Authorization": f"Bearer {ha_token}"}, timeout=5)
-    cam = httpx.Client(base_url=go2rtc, timeout=60)
     next_prune, active_before, due = 0.0, None, 0.0
     while True:
         # Poll motion every 2 s so a new event switches to fast mode straight away.
@@ -137,13 +172,13 @@ def main(out, go2rtc, stream, motion_entity, ha_url, ha_token, idle, fast, hold,
         if time.time() >= due:
             due = time.time() + (fast if active else idle)
             try:
-                jpg = cam.get("/api/frame.jpeg", params={"src": stream}).raise_for_status().content
+                jpg = grab(rtsp, stream, quality, timeout=30)
                 local = dt.datetime.now()
                 folder = out / local.strftime("%F") / "snapshots"
                 folder.mkdir(parents=True, exist_ok=True)
                 (folder / f"{local:%H%M%S}{'_motion' if active else ''}.jpg").write_bytes(jpg)
                 latest.update(jpg=jpg, at=now.strftime("%a, %d %b %Y %H:%M:%S GMT"))
-            except httpx.HTTPError as e:
+            except (RuntimeError, subprocess.TimeoutExpired) as e:
                 log.warning("grab failed: %s", e)
         if keep_days and time.time() > next_prune:
             prune(out, keep_days)

@@ -5,6 +5,8 @@ services:
     container_name: nestsnap-go2rtc
     restart: unless-stopped
     network_mode: host
+    # Safety net for go2rtc leaks (#2624): restart it rather than starve the host. Normal use is ~50 MB.
+    mem_limit: 1g
     entrypoint: ["sh", "-c", "set -a; . /secrets/nest.env; exec go2rtc -config /config/go2rtc.yaml"]
     volumes:
       - /opt/nestsnap/deploy/go2rtc.yaml:/config/go2rtc.yaml:ro
@@ -15,7 +17,8 @@ services:
     restart: unless-stopped
     network_mode: host
     depends_on: [go2rtc]
-    entrypoint: ["sh", "-c", "set -a; . /secrets/ha.env; exec uv run --script /app/capture.py"]
+    # ffmpeg grabs the frames (see capture.py); installed on first start, kept across restarts.
+    entrypoint: ["sh", "-c", "command -v ffmpeg >/dev/null || apk add --no-cache ffmpeg; set -a; . /secrets/ha.env; exec uv run --script /app/capture.py"]
     environment:
       TZ: Europe/London
       UV_CACHE_DIR: /uv-cache

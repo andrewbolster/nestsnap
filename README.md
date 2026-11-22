@@ -34,7 +34,7 @@ Home Assistant mounts as Media) every 5 minutes. Nothing is deleted anywhere unl
 
 | | |
 |---|---|
-| `capture.py` | Grabs frames from go2rtc; polls Home Assistant for motion. Runs in the `capture` container. |
+| `capture.py` | Grabs frames from go2rtc's RTSP output with a one-shot ffmpeg (not `/api/frame.jpeg`, which leaks: go2rtc #2624); polls Home Assistant for motion. Runs in the `capture` container. |
 | `timelapse.py` | Builds a timelapse for a day or a date range. Works on any folder with the layout above (`--root`), with a local ffmpeg or the linuxserver/ffmpeg image. |
 | `setup_token.py` | One-off Google OAuth dance for go2rtc's refresh token. |
 | `deploy/compose.yml` | go2rtc + capture stack (Portainer or `docker compose`). |
